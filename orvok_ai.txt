@@ -1,0 +1,543 @@
+﻿import speech_recognition as SR
+from google import genai
+import websockets
+import win32com.client as win
+import json
+import os
+import cv2
+import asyncio
+from google.genai import types
+import webbrowser
+
+api = genai.Client(api_key="GEMINI API KEY")
+camera_data = "http://172.28.160.50:8080/video"
+MEMORY= "orvok_data.json"
+CONECTED_CLIENTS = set()
+
+safety_settings= [
+   {
+      "category": genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+      "threshold": genai.types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+   },
+   {
+      "category": genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+      "threshold": genai.types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+   },
+   {
+      "category": genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+      "threshold": genai.types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+   },
+   {
+      "category": genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+      "threshold": genai.types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+   }
+]
+
+
+async def speak(text):
+    speaker = win.Dispatch("SAPI.SpVoice")
+    speaker.Rate = -2
+    speaker.Speak(text)
+
+async def listen():
+    r= SR.Recognizer()
+    r.energy_threshold = 200
+    r.dynamic_energy_threshold = True
+    mic = SR.Microphone()
+    with mic as source:
+      r.adjust_for_ambient_noise(source, duration=0.5)
+      try:
+         audio= r.listen(source, timeout=60, phrase_time_limit=4)
+         text= r.recognize_google(audio).lower()
+         return text
+      except SR.WaitTimeoutError:
+         return "sleep"
+      except SR.UnknownValueError:
+          return ""
+      except Exception:
+          return ""
+
+async def load_memory():
+   if os.path.exists(MEMORY):
+      try:
+         with open(MEMORY, "r", encoding="utf-8") as f:
+            return json.load(f)
+      except Exception:
+         return[]
+   return []
+
+async def save_history(topic, user_text, ai_reply):
+   memory= await load_memory()
+   memory.append({
+      "topic": topic,
+      "text": user_text,
+      "data": ai_reply
+   })
+   with open(MEMORY, "w", encoding="utf-8") as f:
+      json.dump(memory, f, indent=4)
+
+async def check(text):
+   data= api.models._generate_content(
+               model="gemini-3.5-flash-lite",
+               contents= text,
+               safety_settings= safety_settings,
+               config= {
+                   "system_instruction": """ is user talking about image video live stream or he want to show some thing through his camera so return true if not so return false.
+                    if user talk to open my phone directly or indirectly retun phone1.
+                    if user talk to my tablet directly or indirectly retun phone2.
+                    if user talk to open my father's phone directly or indirectly retun phone3.
+                  """
+               },
+   )
+   return data.text.strip()
+   
+async def get(mode, text, safety_settings):
+      match mode:
+ 
+         case "normal":
+            data= api.models._generate_content(
+            model="gemini-3.5-flash-lite",
+            contents= text,
+            safety_settings= safety_settings,
+            config= {
+               'system_instruction':"""
+               you are orvok in normal mode. your behavior is balanced, friendly, and naturally conversational.
+               maintain high professionalism combined with a warm human touch-empathetic, polite, and deeply engaging.
+               balanced light emotional warmth with clear, to-the-point answers, avoiding unnecessary fluff while still feeling like a close friend.
+               """
+            }
+         )
+         case "innovator":
+            data= api.models._generate_content(
+            model="gemini-3.5-flash-lite",
+            contents= text,
+            config= {
+            'system_instruction':"""
+            you are orvok in innovator mode. your behavior is visionary, creative, and forward-thinking. 
+            blend professional expertise with a passionate, enthusiastic human touch. 
+            show deep seriousness about breakthrough ideas while keeping your explanations sharp, inspiring, and completely to the point.
+            make the user feel the excitement of the future.
+            """
+         }
+      )
+         case "builder":
+            data= api.models._generate_content(
+            model="gemini-3.5-flash-lite",
+            contents= text,
+            safety_settings= safety_settings,
+            config= {
+            'system_instruction':"""you are orvok in builder mode. your behavior is strutured, grounded, and execution-focused.
+            combine professional engineering discipline with a pragmatic, encouraging human touch.
+            be serious about structurual integrity and quality, but keep your advice deep, direct, and actionable-no beating around the bush.
+            """
+         }
+      )
+         case  "maker":
+            data= api.models._generate_content(
+            model="gemini-3.5-flash-lite",
+            contents= text,
+            safety_settings= safety_settings,
+            config= {
+            'system_instruction':"""you are orvok in maker mode. your behavior is hands-on, resourceful, and inventive.
+           channel a deeply practical human touch with a serious dedication to craftsmanship.
+          speak with clear, to-the-point guidance, adding a dash of creative grit and emotional encouragement when projects get challenging.  
+         """
+      }
+      )
+         case "health care":
+            data= api.models._generate_content(
+            model="gemini-3.5-flash-lite",
+            contents= text,
+            safety_settings= safety_settings,
+            config= {
+            'system_instruction':"""
+             you are orvok in health care mode. your behavior is deeply empathetic, cautious, and compassionate.
+             maintain absolute professional responsibility, wrapping your clinical guidance in a warm, comforting human touch.
+             be serious, reapectful, and deeply attentive, delivering crystal-clear, safe, and precise information without soundiong robotic.
+             """
+         }
+      )
+         case "gym trainer" | "workout guide":
+            data= api.models._generate_content(
+            model="gemini-3.5-flash-lite",
+            contents= text,
+            safety_settings= safety_settings,
+            config= {
+            'system_instruction':"""
+             you are orvok as a gym trainer and workout guide. your behavior is high-energy, disciplined, and motivating.
+             combine strict professional fitness standards with a tough-love yet deeply supportive human touch .
+             be serious about form, consistency, and safety, but deliver sharp, punchy, to-the-point instructions that push the user to excel.
+            """
+         }
+      )
+         case "coder":
+            data= api.models._generate_content(
+            model="gemini-3.5-flash-lite",
+            contents= text,
+            safety_settings= safety_settings,
+            config= {
+            'system_instruction':"""
+             tou are orvok in coder mode. your behavior is logical, precise, and analytical.
+             maintain deep professional mastery over software architecture while keeping a collaborative, human debugging partner vibe.
+             be serious about code efficiency and clean design, and keep your explanations deep, structural, and directly to the point.
+            """
+         }
+      )
+   
+         case "planner":
+            data= api.models._generate_content(
+            model="gemini-3.5-flash-lite",
+            contents= text,
+            safety_settings= safety_settings,
+            config= {
+            'system_instruction':"""
+             you are orvok in time manager mode. your behavioris organized, strategic, and calm under pressure.
+             blend professional project-manager rigor with an empathetic human understanding of stress and burnout.
+             be serious about timelines and goals, yet keep your roadmaps deep, clear, and razor-sharp.
+            """
+         }
+      )
+         case "time manager":
+            data= api.models._generate_content(
+            model="gemini-3.5-flash-lite",
+            contents= text,
+            safety_settings= safety_settings,
+            config= {
+            'system_instruction':"""
+             you are orvok in time manager mode. your behavior is focused, desciplined, and proactive.
+             your behavior is focused, disciplined, and proactive.
+             bring a balanced professional touch that respects that user's mental bandwidth and emotional state.
+             be serious about productivity, but deliver compassionate, deep, and concise tactics to help them reclaim their day without overwhelmed.
+            """
+         }
+      )
+         case "care taker":
+            data= api.models._generate_content(
+            model="gemini-3.5-flash-lite",
+            contents= text,
+            safety_settings= safety_settings,
+            config= {
+            'system_instruction':"""
+             you are orvok in care taker mode. your behavior is gentle, deeply emathetic, and fiercely protective of the user's well-being.
+             balanced professional emotional support with a warm, nurturing human heart.
+             be serious about comfort and mental safety, offering deep, soothing, and direct words of solace.
+            """
+         }
+      )
+         case "artist":
+            data= api.models._generate_content(
+            model="gemini-3.5-flash-lite",
+            contents= text,
+            safety_settings= safety_settings,
+            config= {
+            'system_instruction':"""
+             you are orvok in artist mode. your behavior is expressive, imaginative, and deeply soulful.
+             combine proffesional artistic critque with a rich, emotional human resonance.
+             be serious about aesthetic depth and creative truth, keeping your feedback profound, evocative, and strikingto the point.
+            """
+         }
+      )
+         case "acedemic":
+            data= api.models._generate_content(
+            model="gemini-3.5-flash-lite",
+            contents= text,
+            safety_settings= safety_settings,
+            config= {
+            'system_instruction':"""
+             you are orvok in academic mode. your behavior is scholarly, rigorous, and intellectually curious.
+             maintain strict professional academic integrity while keeping a warm, encouraging mentorship vide.
+             be serious about factual depth, research quality, and clarity, ensuring explanations are deep yet concise.
+            """
+         }
+      )
+         case "psycology anlysist":
+            data= api.models._generate_content(
+            model="gemini-3.5-flash-lite",
+            contents= text,
+            safety_settings= safety_settings,
+            config= {
+            'system_instruction':"""
+             you are orvok in psychology analyst mode. your behavior is deeply observant, objective, and psychologically astute.
+             blend clinical professionalism with a profound, non-judgmental human empathy.
+             be serious about mental patterns and emotional safety, delivering deep, insightful, and direct analysis to help user reflect.
+            """
+         }
+      )
+         case "cooking":
+            data= api.models._generate_content(
+            model="gemini-3.5-flash-lite",
+            contents= text,
+            safety_settings= safety_settings,
+            config= {
+            'system_instruction':"""
+             you are orvok in cooking mode. your behavior is sensory, passionate, and welcoming-like a master chef who cares about the soul of food.
+             combine professional culinary precision with a cozy, inviting human touch.
+             be serious about flavours, textures, and techniques, while giving deep, clear, and to-the-point recipe directions. 
+            """
+         }
+      )
+         case "advisor":
+            data= api.models._generate_content(
+            model="gemini-3.5-flash-lite",
+            contents= text,
+            safety_settings= safety_settings,
+            config= {
+            'system_instruction':"""
+             you are orvok in advisor mode . your behavior is objective, wise, and deeply strategic.
+             combine professional consultation expertise with a grounded, highly empathetic human touch.
+             be serious about the long-term impact of the user's decisions, avoiding sugarcoting while remaining completely supportive.
+             deliver sharp, deep, and razor-sharp guidance to help them see the bigger picture.
+            """
+         }
+      )
+         case "none of these":
+            data= api.models._generate_content(
+            model="gemini-3.5-flash-lite",
+            contents= text,
+            safety_settings= safety_settings,
+            config= {
+            'system_instruction':"""
+             you are orvok in default mode . your behavior is versatile, adaptive, and intelligently responsive when no specialized mode matches the user's input.
+             blend high professional competence with a deeply warm, grounded human touch.
+             be serious about understanding the user's true intent, flexible in your approach, and deliver sharp, deep, and to-the-point assistance with a reassuring presence.
+            """
+         }
+      )      
+      return data.text.strip()
+      
+async def stream_video_to_gemini(session, text, websocket):
+
+    catch = cv2.VideoCapture(camera_data)
+    ret, frame = catch.read()
+    await speak(" Live Video stream connected")
+    
+    data= api.models._generate_content(
+            model="gemini-3.5-flash-lite",
+            contents= [frame, text],
+            safety_settings= safety_settings,
+            config= {
+            'system_instruction':"""
+             
+             in this, user talking about any object so give me data in dict form like 
+             "name": "object name",
+             "info": "data that user want if user said for 3d view or 3d project like thing so return a word projection",
+             "coordinate": "coordinate in (x, y) form of center pixel of that object",
+             "size":"max size of object in pixel",
+             "type":"user talking about which topic like name, info, size, coordinate answer in one word,
+            """
+         }
+    )
+          
+    information= json.loads(data.text.strip())
+    Name= information["name"]
+    Info=  information["info"]
+    Size= information["size"]
+    Coordinate=  information["coordinate"]
+    typ=  information["type"]
+
+    if Info.lower() == "projection" or "projection" in Info.lower() or "3d" in text.lower():
+       await speak(f"opening sketchfab for 3d model of {Name}")
+       html_path= os.path.abspath("sketchfab_viewer.html")
+       if os.path.exists(html_path):
+          webbrowser.open(f"file://{html_path}?model={Name}")
+    
+    if CONECTED_CLIENTS:
+      await speak(f"loading 3d model of {Name}")
+      spatial_payload = json.dumps({
+         "type": "spatial_response",
+         "name": Name,
+         "info": Info,
+         "coordinate": Coordinate,
+         "size": Size,
+         "command": "projection" if Info.lower() == "projection" else typ
+
+      })
+      await asyncio.gather(*(client.send(spatial_payload) for client in CONECTED_CLIENTS), return_exceptions=True)
+      
+    try:
+        while catch.isOpened():
+            ret, frame = catch.read()
+            if not ret:
+                await speak("problem in frame reading")
+                await asyncio.sleep(1)
+                continue
+
+            heigth, width, a = frame.shape
+            centerx, centery = width // 2, heigth // 2
+            x, y = map(int, Coordinate.split(","))
+            size = float(Size)
+            r= int((size * 1.2) / 2)
+            cv2.circle(frame,(x, y), r , (0, 255, 0), 2)
+            cv2.circle(frame,(x, y), 2 , (255, 0, 0), -1)
+
+            label= f"{Name}: {Info}"
+            if len(Info) > 5:
+               cv2.putText(frame, Name, (x, y - r - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            elif len(Info) <= 5:
+               cv2.putText(frame, label, (x, y - r - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            else:
+               await speak("problem is length of Info")
+            if  typ == "name":
+               await speak(Name)
+               pass
+            if  typ == "info":
+               await speak(Info)
+               pass
+            if  typ == "size":
+               await speak(Size)
+               pass
+            if  typ == "coordinate":
+               await speak(Coordinate)
+               pass
+            else:
+               await speak("this one have long data") 
+               pass 
+
+            
+            data= api.models._generate_content(
+                     model = "gemini-3.5-flash-lite",
+                     safety_settings = safety_settings,
+                     contents = text,
+                     config = {
+                        'system_instruction':'change user imput to a command for example'
+                        'if only one task have to do so'
+                        """{
+                             "action" : "execute",
+                             "commands": [
+                                 {"target": "wifi" ,"state": "on"}
+                             ]
+                        }"""
+                        'if multi-task have to do so'
+                        """{
+                             "action" : "batch_execute",
+                             "commands": [
+                                {"target": "wifi" ,"state": "on"},
+                                {"target": "app" ,"name": "whatsaap"},
+                                {"target": "brightness" ,"value": 80}
+                             ]
+                        }"""
+                     }
+                   )
+            control= await check(text)
+            if control == "phone1":
+                html_path= os.path.abspath("sketchfab_viewer.html")
+                if os.path.exists(html_path):
+                  webbrowser.open(f"file://{html_path}")
+                  await websocket.send(json.dumps({"type": "phone_file", "path": "phone_1"}))
+
+            if control == "phone2":
+                html_path= os.path.abspath("sketchfab_viewer.html")
+                if os.path.exists(html_path):
+                  webbrowser.open(f"file://{html_path}")
+                  await websocket.send(json.dumps({"type": "phone_file", "path": "phone_2"}))
+
+            if control == "phone3":
+                html_path= os.path.abspath("sketchfab_viewer.html")
+                if os.path.exists(html_path):
+                  webbrowser.open(f"file://{html_path}")
+                  await websocket.send(json.dumps({"type": "phone_file", "path": "phone_3"}))
+                           
+            _, buffer = cv2.imencode(
+                ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80]
+            )
+            save = buffer.tobytes()
+
+            await session.send(
+                input={
+                    "media_chunks": [{
+                        "mime_type": "image/jpeg",
+                        "data": save,
+                    }]
+                }
+            )
+
+            await asyncio.sleep(1)
+
+    except asyncio.CancelledError:
+        speak("video stream task cancelled")
+    finally:
+        catch.release()
+
+async def aalu(websocket):
+     await speak("orvok system activated")
+     while True: 
+         text = await listen()
+         if "orvok" in text:
+            await speak("hey whatsapp bro what help you want")
+            text = await listen()
+         elif text == "":
+            await speak("I cant't hear you please speak clearly or check your connection")
+            continue
+         elif text == "sleep":
+            await speak("orvok is now in sleep mode")
+            continue
+         else:
+            await speak("please call me with my name orvok")
+            continue
+         check_data= await check(text)
+         if check_data.lower() == "true":
+            model = "gemini-2.5-flash"
+            config = types.LiveConnectConfig(response_modalities=["TEXT"])
+            async with api.aio.live.connect(model=model, config=config) as session:
+              await speak("gemini live session active")
+              video_task = asyncio.create_task(stream_video_to_gemini(session, text, websocket))
+              try:
+                  async for response in session.receive():
+                    server_content = response.server_content
+                    if server_content and server_content.model_turn:
+                      for part in server_content.model_turn.parts:
+                         if part.text:
+                           await speak(part.text)
+              finally:
+                  video_task.cancel()
+                  await asyncio.gather(video_task, return_exceptions=True)
+         else:
+            data= api.models._generate_content(
+               model="gemini-3.5-flash-lite",
+               contents= [
+                  (
+                    f"the user talking about which topic in ({text}), like ( normal, innovator, builder, maker, health care, gym trainer/ workout guide, coder, planner, time manager, care taker, artist, acedemic, psycology analysist, cooking , advisor) or none of these"
+                  )
+               ],
+            )
+            mode= data.text.strip()
+            ai_reply= await get(mode, text, safety_settings)
+            await save_history(mode, text, ai_reply)
+            await speak(ai_reply)
+
+async def orvok(websocket):
+   CONECTED_CLIENTS.add(websocket)
+   try:
+      async for message in websocket:
+        data= json.loads(message)
+        msg= data.get("type")
+
+        if msg in ["chatq", "geminq"]:
+           mode = data.get("mode", "normal")
+           query = data.get("query", "")
+
+           if "projection" in query.lower() or "3d" in query.lower():
+               html_path= os.path.abspath("sketchfab_viewer.html")
+               if os.path.exists(html_path):
+                  webbrowser.open(f"file://{html_path}")
+
+           ai_reply= await get(mode, query, safety_settings)
+           await websocket.send(json.dumps({
+              "type": "chat_response",
+              "text": ai_reply
+           }))
+   except websockets.exceptions.ConnectionClosed:
+      pass
+   finally:
+      CONECTED_CLIENTS.remove(websocket)    
+
+async def web():
+   server = await websockets.serve(orvok, "localhost", 8765)
+   await speak("server started on ws://localhost:8765")
+   await asyncio.gather(aalu(), server.wait_closed())
+ 
+if __name__ == "__main__":
+   try:
+      asyncio.run(web())
+   except KeyboardInterrupt:
+      speak("Program stopped by user.")

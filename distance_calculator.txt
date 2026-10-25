@@ -1,0 +1,112 @@
+﻿import json
+import cv2
+from google import genai
+from PIL import Image
+
+api = genai.Client(api_key="GEMINI API KEY")
+camera_data = "http://10.118.223.100:8080/video"
+catch = cv2.VideoCapture(camera_data)
+
+if not catch.isOpened():
+    print("PLEASE CHECK YOUR CONNECTIONS!")
+    exit()
+print("I GOT YOUR CAMERA DATA")
+print("Processing...")
+
+target_f = 30
+distances = []
+OS = float(input("Enter object real size in cm: "))
+
+while True:
+    ret, frame = catch.read()
+    if not ret or frame is None:
+        print("no frame")
+        continue
+    cv2.imshow("Webcam Stream", frame)
+    button = cv2.waitKey(1) & 0xFF
+    if button == ord("s"):
+        frame_num = 0
+        while frame_num < target_f:
+            ret, frame = catch.read()
+            if not ret or frame is None:
+              print("no frame")
+              continue
+            frame_num += 1
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            photo = Image.fromarray(rgb_frame)
+        
+            prompt = """
+            MY ROBOT MAX POWER IS 1000 N.
+            Analyze this image and find the object. Return ONLY a valid JSON object without markdown fences in this exact structure:
+            {
+            "name": "object name",
+            "mass": "object mass in kg",
+            "hight": "object height in pixel",
+            "width": "pixel width",
+            "size": "sensor height in mm",
+            "focal_length": "optical focal length min mm",
+            "resolution": "image resolution",
+            "Image_h": "image height in px",
+            "Info" : "short description",
+            "coordinate" : "x, y pixel coordinates of center like 100,200"
+            }
+            """
+            try:
+               data = api.models.generate_content(
+               model="gemini-3.5-flash-lite",
+               contents=[photo, prompt],
+               )
+         
+               transformation = data.text
+            
+               try:
+                  save = json.loads(transformation)
+               except Exception:
+                   clean_text = transformation.replace("```json", "").replace("```", "").strip()
+                   save = json.loads(clean_text)
+          
+               name = save["name"]
+               mass = float(save["mass"])
+               pixel_height = float(save["hight"])
+               pixel_width = float(save["width"])
+               size = float(save["size"])
+               focal_length = float(save["focal_length"])
+               resolution = save["resolution"]
+               Image_h = float(save["Image_h"]) 
+               Info=  save["Info"]
+               Coordinate=  save["coordinate"]
+    
+               FH= focal_length * Image_h
+               FL= FH / size
+               distances.append(FL)
+
+               heigth, width, a = frame.shape
+               x, y = map(int, Coordinate.split(","))
+               size = float(size)
+               r= int((size * 1.2) / 2)
+               cv2.circle(frame,(x, y), r , (0, 255, 0), 2)
+               cv2.circle(frame,(x, y), 2 , (255, 0, 0), -1)
+
+               label= f"{name}: {Info}"
+               if len(Info) > 5:
+                 cv2.putText(frame, name, (x, y - r - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+               elif len(Info) <= 5:
+                 cv2.putText(frame, label, (x, y - r - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+               else:
+                 print("problem is length of Info")
+            except Exception as e:
+               print(f"error {e}")
+        print("we got 30 frame")
+        break
+    elif button == ord("q") or button == ord("w"):
+      print("Exiting...")
+      break
+
+catch.release()
+cv2.destroyAllWindows()
+
+if len(distances) > 0:
+   dis= sum(distances) / len(distances)
+   print(dis)
+else:
+   print("no distance calculated")
